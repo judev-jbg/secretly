@@ -12,6 +12,7 @@ import { useCryptoStore } from '../stores/crypto.js'
 import { useSecretsStore } from '../stores/secrets.js'
 import { secretsApi } from '../services/api.js'
 import SecretCard from '../components/SecretCard.vue'
+import SecretSheet from '../components/SecretSheet.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -162,6 +163,11 @@ onMounted(async () => {
         </div>
       </template>
     </main>
+
+    <!-- Bottom sheet de detalle -->
+    <Teleport to="body">
+      <SecretSheet :secret-id="activeId" @close="activeId = null" />
+    </Teleport>
 
     <!-- FAB -->
     <RouterLink to="/vault/new" class="fab" aria-label="Nuevo secreto">
