@@ -1,3 +1,7 @@
+# Secretly - Un gestor de secretos seguro y fácil de usar
+
+Secretly es una aplicación de gestión de secretos con el principio Zero-Knowledge diseñada para almacenar y proteger información sensible. Utiliza cifrado AES-256-GCM con una clave derivada de la contraseña del usuario mediante Argon2id, garantizando que los datos estén protegidos incluso si el servidor es comprometido.
+
 ## Estructura de componentes Vue
 
 ```bash
