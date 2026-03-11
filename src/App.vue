@@ -1,11 +1,35 @@
-<script setup></script>
+<script setup>
+import { watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from './stores/auth.js'
+import { useCryptoStore } from './stores/crypto.js'
+import { useSecretsStore } from './stores/secrets.js'
+import { useActivityMonitor } from './composables/useActivityMonitor.js'
+
+const router = useRouter()
+const auth = useAuthStore()
+const crypto = useCryptoStore()
+const secrets = useSecretsStore()
+
+const { start, stop } = useActivityMonitor(() => {
+  // Destruir sesión al expirar el monitor de actividad
+  auth.clear()
+  crypto.clear()
+  secrets.clear()
+  window.location.reload()
+})
+
+// Arrancar/detener el monitor según el estado de autenticación
+watch(
+  () => auth.isAuthenticated && crypto.hasKey,
+  (authenticated) => {
+    if (authenticated) start()
+    else stop()
+  },
+  { immediate: true },
+)
+</script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
+  <RouterView />
 </template>
-
-<style scoped></style>
