@@ -4,18 +4,17 @@
  * No tiene dependencias de Vue ni del estado de la aplicación.
  */
 
-import argon2 from 'argon2-browser'
+import { argon2id } from 'hash-wasm'
 
 /**
  * Parámetros de Argon2id para derivación de clave.
  * Balanceados para uso en navegador (no demasiado lentos en móvil).
  */
 const ARGON2_PARAMS = {
-  time: 3,
-  mem: 64 * 1024, // 64 MB
+  iterations: 3,
+  memorySize: 64 * 1024, // 64 MB
   parallelism: 1,
-  hashLen: 32,
-  type: argon2.ArgonType.Argon2id,
+  hashLength: 32,
 }
 
 /**
@@ -49,15 +48,18 @@ export async function deriveKey(pin, phrase, saltBase64) {
   const password = `${pin}:${phrase}`
   const salt = base64ToUint8Array(saltBase64)
 
-  const result = await argon2.hash({
-    pass: password,
+  const hashHex = await argon2id({
+    password,
     salt,
     ...ARGON2_PARAMS,
+    outputType: 'hex',
   })
+
+  const hashBytes = new Uint8Array(hashHex.match(/.{2}/g).map((b) => parseInt(b, 16)))
 
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    result.hash,
+    hashBytes,
     { name: 'AES-GCM' },
     false, // no exportable
     ['encrypt', 'decrypt'],

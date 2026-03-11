@@ -6,26 +6,26 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock de argon2-browser antes de importar vault.js
-vi.mock('argon2-browser', () => {
-  const ArgonType = { Argon2id: 2 }
-
+// Mock de hash-wasm antes de importar vault.js
+vi.mock('hash-wasm', () => {
   /**
-   * Simula argon2.hash() retornando un hash derivado via HKDF para los tests.
+   * Simula argon2id() retornando un hash derivado via HKDF para los tests.
    * No reemplaza la seguridad real — solo permite que los tests corran en Node.
    */
-  const hash = async ({ pass, salt }) => {
+  const argon2id = async ({ password, salt }) => {
     const enc = new TextEncoder()
-    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(pass), 'HKDF', false, ['deriveBits'])
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'HKDF', false, ['deriveBits'])
     const hashBits = await crypto.subtle.deriveBits(
       { name: 'HKDF', hash: 'SHA-256', salt, info: new Uint8Array() },
       keyMaterial,
       256,
     )
-    return { hash: new Uint8Array(hashBits) }
+    return Array.from(new Uint8Array(hashBits))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
   }
 
-  return { default: { hash, ArgonType }, ArgonType }
+  return { argon2id }
 })
 
 import { generateSalt, generateIV, deriveKey, encrypt, decrypt } from '../crypto/vault.js'
