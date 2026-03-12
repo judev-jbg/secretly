@@ -1,30 +1,25 @@
 <script setup>
 /**
- * @fileoverview Vista de login — flujo completo de autenticación.
- * Paso 1: email + password → JWT + salt
- * Paso 2: PIN + frase → deriveKey → cryptoStore
+ * @fileoverview Vista de login — flujo de un solo paso.
+ * email + password → JWT + salt → setSession → /vault
+ * El PIN+frase se solicita on-demand en el bottom sheet al ver un secreto.
  */
 
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 import { authApi } from '../services/api.js'
-import { deriveKey } from '../crypto/vault.js'
 
 const router = useRouter()
 const auth = useAuthStore()
-const crypto = useCryptoStore()
 
-// ─── Pasos del flujo ───────────────────────────────────────────────────────
-const step = ref('credentials') // 'credentials' | 'pin'
-
-// ─── Paso 1: credentials ──────────────────────────────────────────────────
 const credentials = reactive({ email: '', password: '' })
 const credError = ref('')
 const credLoading = ref(false)
-const sessionData = reactive({ token: '', refreshToken: '', salt: '' })
 
+/**
+ * Autentica al usuario. Distingue error de red de credenciales incorrectas.
+ */
 async function submitCredentials() {
   credError.value = ''
   credLoading.value = true
@@ -33,45 +28,23 @@ async function submitCredentials() {
       email: credentials.email,
       password: credentials.password,
     })
-    sessionData.token = data.access_token
-    sessionData.refreshToken = data.refresh_token
-    sessionData.salt = data.salt
-    step.value = 'pin'
-  } catch {
-    credError.value = 'Credenciales incorrectas.'
+    auth.setSession({
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+      email: credentials.email,
+      salt: data.salt,
+    })
+    router.push('/vault')
+  } catch (err) {
+    if (!err.response) {
+      credError.value = 'No se puede conectar al servidor. Verifica tu conexión.'
+    } else if (err.response.status === 401) {
+      credError.value = 'Credenciales incorrectas.'
+    } else {
+      credError.value = 'Error al iniciar sesión. Intenta de nuevo.'
+    }
   } finally {
     credLoading.value = false
-  }
-}
-
-// ─── Paso 2: PIN + frase ──────────────────────────────────────────────────
-const pin = ref('')
-const phrase = ref('')
-const pinError = ref('')
-const pinLoading = ref(false)
-const showPhrase = ref(false)
-
-async function submitPin() {
-  if (!pin.value || !phrase.value) {
-    pinError.value = 'Ingresa tu PIN y frase de seguridad.'
-    return
-  }
-  pinError.value = ''
-  pinLoading.value = true
-  try {
-    const encryptionKey = await deriveKey(pin.value, phrase.value, sessionData.salt)
-    auth.setSession({
-      token: sessionData.token,
-      refreshToken: sessionData.refreshToken,
-      email: credentials.email,
-      salt: sessionData.salt,
-    })
-    crypto.setKey(encryptionKey)
-    router.push('/vault')
-  } catch {
-    pinError.value = 'Error al derivar la clave. Intenta de nuevo.'
-  } finally {
-    pinLoading.value = false
   }
 }
 
@@ -91,14 +64,6 @@ async function submitForgot() {
     forgotLoading.value = false
   }
 }
-
-function backToCredentials() {
-  step.value = 'credentials'
-  pin.value = ''
-  phrase.value = ''
-  pinError.value = ''
-  Object.assign(sessionData, { token: '', refreshToken: '', salt: '' })
-}
 </script>
 
 <template>
@@ -115,16 +80,14 @@ function backToCredentials() {
           </svg>
         </div>
         <h1 class="login-title">secretly</h1>
-        <p class="login-subtitle">
-          {{ step === 'credentials' ? 'acceso seguro' : 'desbloquea tu vault' }}
-        </p>
+        <p class="login-subtitle">acceso seguro</p>
       </header>
 
       <Transition name="slide" mode="out-in">
 
-        <!-- Paso 1: credenciales -->
+        <!-- Credenciales -->
         <form
-          v-if="step === 'credentials' && !showForgot"
+          v-if="!showForgot"
           key="credentials"
           class="login-form"
           @submit.prevent="submitCredentials"
@@ -159,7 +122,7 @@ function backToCredentials() {
           <p v-if="credError" class="form-error" role="alert">{{ credError }}</p>
 
           <button type="submit" class="btn-primary" :disabled="credLoading">
-            <span v-if="!credLoading">Continuar</span>
+            <span v-if="!credLoading">Ingresar</span>
             <span v-else class="btn-loading" aria-label="Cargando">
               <span class="dot" /><span class="dot" /><span class="dot" />
             </span>
@@ -176,7 +139,7 @@ function backToCredentials() {
 
         <!-- Recuperar contraseña -->
         <form
-          v-else-if="showForgot"
+          v-else
           key="forgot"
           class="login-form"
           @submit.prevent="submitForgot"
@@ -221,75 +184,7 @@ function backToCredentials() {
           </button>
         </form>
 
-        <!-- Paso 2: PIN + frase -->
-        <form
-          v-else-if="step === 'pin'"
-          key="pin"
-          class="login-form"
-          @submit.prevent="submitPin"
-          novalidate
-        >
-          <p class="step-hint">
-            Ingresa tu PIN y frase de seguridad para desbloquear el vault.
-            Estas credenciales nunca salen de tu dispositivo.
-          </p>
-
-          <div class="field">
-            <label class="field-label" for="pin">PIN</label>
-            <input
-              id="pin"
-              v-model="pin"
-              type="password"
-              class="field-input field-input--pin"
-              placeholder="· · · ·"
-              inputmode="numeric"
-              maxlength="16"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="phrase">
-              Frase de seguridad
-              <button
-                type="button"
-                class="toggle-visibility"
-                @click="showPhrase = !showPhrase"
-                :aria-label="showPhrase ? 'Ocultar frase' : 'Mostrar frase'"
-              >
-                {{ showPhrase ? 'ocultar' : 'mostrar' }}
-              </button>
-            </label>
-            <input
-              id="phrase"
-              v-model="phrase"
-              :type="showPhrase ? 'text' : 'password'"
-              class="field-input"
-              placeholder="tu frase secreta"
-              autocomplete="off"
-            />
-          </div>
-
-          <p v-if="pinError" class="form-error" role="alert">{{ pinError }}</p>
-
-          <button type="submit" class="btn-primary" :disabled="pinLoading">
-            <span v-if="!pinLoading">Desbloquear vault</span>
-            <span v-else class="btn-loading" aria-label="Desbloqueando">
-              <span class="dot" /><span class="dot" /><span class="dot" />
-            </span>
-          </button>
-
-          <button type="button" class="btn-ghost" @click="backToCredentials">
-            ← Cambiar cuenta
-          </button>
-        </form>
-
       </Transition>
-
-      <div class="step-dots" aria-hidden="true">
-        <span class="step-dot" :class="{ active: step === 'credentials' }" />
-        <span class="step-dot" :class="{ active: step === 'pin' }" />
-      </div>
     </main>
   </div>
 </template>
@@ -436,22 +331,6 @@ function backToCredentials() {
   color: var(--c-text-muted);
 }
 
-.toggle-visibility {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--c-accent);
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 150ms var(--ease);
-}
-
-.toggle-visibility:hover { opacity: 1; }
-
 .field-input {
   width: 100%;
   padding: 0.6rem 0.8rem;
@@ -478,12 +357,6 @@ function backToCredentials() {
   border-color: var(--c-border-focus);
   background: rgba(54, 129, 106, 0.04);
   box-shadow: 0 0 0 3px rgba(54, 129, 106, 0.08);
-}
-
-.field-input--pin {
-  letter-spacing: 0.35em;
-  text-align: center;
-  font-size: 1rem;
 }
 
 /* ─── Mensajes ──────────────────────────────────────────────────── */
@@ -560,6 +433,8 @@ function backToCredentials() {
   text-align: center;
   transition: color 150ms var(--ease);
   letter-spacing: 0.04em;
+  text-decoration: none;
+  display: block;
 }
 
 .btn-ghost:hover { color: var(--c-text); }
@@ -585,27 +460,6 @@ function backToCredentials() {
 @keyframes pulse {
   0%, 80%, 100% { opacity: 0.15; transform: scale(0.75); }
   40%            { opacity: 1;   transform: scale(1); }
-}
-
-/* ─── Step dots ─────────────────────────────────────────────────── */
-.step-dots {
-  display: flex;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 1.5rem;
-}
-
-.step-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--c-border);
-  transition: background 200ms var(--ease), transform 200ms var(--ease);
-}
-
-.step-dot.active {
-  background: var(--c-accent);
-  transform: scale(1.4);
 }
 
 /* ─── Slide transition ──────────────────────────────────────────── */

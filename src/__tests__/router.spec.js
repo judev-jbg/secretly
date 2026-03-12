@@ -19,10 +19,9 @@ import { useAuthStore } from '../stores/auth.js'
  */
 function guard(to) {
   const auth = useAuthStore()
-  const isAuthenticated = auth.isAuthenticated
 
-  if (to.meta.requiresAuth && !isAuthenticated) return { name: 'login' }
-  if (to.meta.public && isAuthenticated) return { name: 'vault' }
+  if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: 'login' }
+  if (to.meta.public && auth.isAuthenticated) return { name: 'vault' }
   return undefined
 }
 
@@ -53,7 +52,7 @@ describe('guard — rutas públicas', () => {
     expect(guard({ meta: { public: true } })).toEqual({ name: 'vault' })
   })
 
-  it('permite acceso a /forgot-password sin sesión', () => {
+  it('permite acceso a /reset-password sin sesión', () => {
     logoutUser()
     expect(guard({ meta: { public: true } })).toBeUndefined()
   })
@@ -95,6 +94,7 @@ describe('definición de rutas', () => {
     const names = router.getRoutes().map((r) => r.name).filter(Boolean)
 
     expect(names).toContain('login')
+    expect(names).toContain('register')
     expect(names).toContain('reset-password')
     expect(names).toContain('vault')
     expect(names).toContain('vault-new')
@@ -110,7 +110,7 @@ describe('definición de rutas', () => {
   it('las rutas públicas tienen meta public', async () => {
     const { default: router } = await import('../router/index.js')
     const publicRoutes = router.getRoutes().filter((r) =>
-      ['login', 'reset-password'].includes(r.name),
+      ['login', 'register', 'reset-password'].includes(r.name),
     )
     publicRoutes.forEach((r) => expect(r.meta.public).toBe(true))
   })

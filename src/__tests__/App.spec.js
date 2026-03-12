@@ -22,9 +22,13 @@ vi.mock('../composables/useActivityMonitor.js', () => ({
   useActivityMonitor: () => ({ start: mockStart, stop: mockStop }),
 }))
 
+// Mockear useBackendHealth para evitar polling en tests
+vi.mock('../composables/useBackendHealth.js', () => ({
+  useBackendHealth: () => ({ isOnline: { value: true } }),
+}))
+
 import App from '../App.vue'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 
 describe('App.vue', () => {
   beforeEach(() => {
@@ -40,21 +44,16 @@ describe('App.vue', () => {
     expect(mockStart).not.toHaveBeenCalled()
   })
 
-  it('inicia el monitor cuando hay sesión completa (JWT + clave en RAM)', async () => {
+  it('inicia el monitor cuando hay sesión activa (JWT)', async () => {
     const auth = useAuthStore()
-    const crypto = useCryptoStore()
     auth.setSession({ token: 'tok', refreshToken: 'ref', email: 'a@b.com', salt: 'salt' })
-    crypto.setKey({})
 
     mount(App)
     await flushPromises()
     expect(mockStart).toHaveBeenCalled()
   })
 
-  it('no inicia el monitor cuando hay JWT pero falta clave en RAM', async () => {
-    const auth = useAuthStore()
-    auth.setSession({ token: 'tok', refreshToken: 'ref', email: 'a@b.com', salt: 'salt' })
-
+  it('no inicia el monitor sin token aunque haya otros datos', async () => {
     mount(App)
     await flushPromises()
     expect(mockStart).not.toHaveBeenCalled()

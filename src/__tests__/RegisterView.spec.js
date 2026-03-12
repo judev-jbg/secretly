@@ -8,10 +8,9 @@ import { setActivePinia, createPinia } from 'pinia'
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const { mockRegister, mockGenerateSalt, mockDeriveKey, mockPush } = vi.hoisted(() => ({
+const { mockRegister, mockGenerateSalt, mockPush } = vi.hoisted(() => ({
   mockRegister: vi.fn(),
   mockGenerateSalt: vi.fn(),
-  mockDeriveKey: vi.fn(),
   mockPush: vi.fn(),
 }))
 
@@ -26,14 +25,12 @@ vi.mock('../services/api.js', () => ({
 
 vi.mock('../crypto/vault.js', () => ({
   generateSalt: mockGenerateSalt,
-  deriveKey: mockDeriveKey,
 }))
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 import RegisterView from '../views/RegisterView.vue'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 
 function mountView() {
   return mount(RegisterView, {
@@ -48,7 +45,6 @@ describe('RegisterView', () => {
     setActivePinia(createPinia())
     mockRegister.mockClear()
     mockGenerateSalt.mockClear()
-    mockDeriveKey.mockClear()
     mockPush.mockClear()
   })
 
@@ -59,7 +55,7 @@ describe('RegisterView', () => {
     expect(wrapper.find('#reg-confirm').exists()).toBe(true)
   })
 
-  it('muestra "crea tu cuenta" como subtítulo en paso 1', () => {
+  it('muestra "crea tu cuenta" como subtítulo', () => {
     const wrapper = mountView()
     expect(wrapper.find('.register-subtitle').text()).toBe('crea tu cuenta')
   })
@@ -92,7 +88,7 @@ describe('RegisterView', () => {
     expect(wrapper.find('.field-hint--error').exists()).toBe(true)
   })
 
-  it('registra al usuario y avanza al paso de PIN', async () => {
+  it('registra al usuario, guarda sesión y redirige al vault', async () => {
     mockGenerateSalt.mockReturnValue('mock-salt')
     mockRegister.mockResolvedValue({
       data: { access_token: 'jwt-token', refresh_token: 'refresh-token' },
@@ -112,8 +108,12 @@ describe('RegisterView', () => {
       password: 'password123',
       salt: 'mock-salt',
     })
-    expect(wrapper.find('.register-subtitle').text()).toBe('configura tu vault')
-    expect(wrapper.find('#reg-pin').exists()).toBe(true)
+
+    const authStore = useAuthStore()
+    expect(authStore.email).toBe('test@email.com')
+    expect(authStore.salt).toBe('mock-salt')
+
+    expect(mockPush).toHaveBeenCalledWith('/vault')
   })
 
   it('muestra error si el email ya está registrado (409)', async () => {
@@ -146,82 +146,18 @@ describe('RegisterView', () => {
     expect(wrapper.find('.form-error').text()).toBe('Error al crear la cuenta. Intenta de nuevo.')
   })
 
-  it('deriva la clave y redirige al vault en paso 2', async () => {
-    const mockCryptoKey = { type: 'secret' }
-    mockGenerateSalt.mockReturnValue('mock-salt')
-    mockRegister.mockResolvedValue({
-      data: { access_token: 'jwt', refresh_token: 'refresh' },
-    })
-    mockDeriveKey.mockResolvedValue(mockCryptoKey)
-
-    const wrapper = mountView()
-
-    // Paso 1
-    await wrapper.find('#reg-email').setValue('new@email.com')
-    await wrapper.find('#reg-password').setValue('password123')
-    await wrapper.find('#reg-confirm').setValue('password123')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    // Paso 2
-    await wrapper.find('#reg-pin').setValue('1234')
-    await wrapper.find('#reg-phrase').setValue('my secret phrase')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    expect(mockDeriveKey).toHaveBeenCalledWith('1234', 'my secret phrase', 'mock-salt')
-
-    const authStore = useAuthStore()
-    expect(authStore.email).toBe('new@email.com')
-
-    const cryptoStore = useCryptoStore()
-    expect(cryptoStore.hasKey).toBe(true)
-
-    expect(mockPush).toHaveBeenCalledWith('/vault')
-  })
-
-  it('muestra error si PIN y frase están vacíos al submit de paso 2', async () => {
+  it('muestra error de conexión si no hay respuesta del servidor', async () => {
     mockGenerateSalt.mockReturnValue('salt')
-    mockRegister.mockResolvedValue({
-      data: { access_token: 'jwt', refresh_token: 'refresh' },
-    })
+    mockRegister.mockRejectedValue({ response: undefined })
 
     const wrapper = mountView()
-
-    // Paso 1
-    await wrapper.find('#reg-email').setValue('x@y.com')
+    await wrapper.find('#reg-email').setValue('test@email.com')
     await wrapper.find('#reg-password').setValue('password123')
     await wrapper.find('#reg-confirm').setValue('password123')
+
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    // Paso 2 sin datos
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    expect(wrapper.find('.form-error').text()).toBe('Ingresa tu PIN y frase de seguridad.')
-  })
-
-  it('el botón "Volver" regresa al paso de cuenta', async () => {
-    mockGenerateSalt.mockReturnValue('salt')
-    mockRegister.mockResolvedValue({
-      data: { access_token: 'jwt', refresh_token: 'refresh' },
-    })
-
-    const wrapper = mountView()
-
-    // Paso 1
-    await wrapper.find('#reg-email').setValue('x@y.com')
-    await wrapper.find('#reg-password').setValue('password123')
-    await wrapper.find('#reg-confirm').setValue('password123')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    // Click "Volver"
-    await wrapper.find('.btn-ghost').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('#reg-email').exists()).toBe(true)
-    expect(wrapper.find('.register-subtitle').text()).toBe('crea tu cuenta')
+    expect(wrapper.find('.form-error').text()).toBe('No se puede conectar al servidor. Verifica tu conexión.')
   })
 })

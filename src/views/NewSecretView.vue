@@ -2,20 +2,18 @@
 /**
  * @fileoverview Vista de creación de nuevo secreto.
  * Formulario dinámico según el tipo de secreto seleccionado.
- * Cifra el blob en el navegador antes de enviarlo al backend.
+ * Al guardar, pide PIN+frase para derivar la clave y cifrar el blob en el navegador.
  */
 
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 import { useSecretsStore } from '../stores/secrets.js'
 import { secretsApi } from '../services/api.js'
-import { encrypt, generateIV } from '../crypto/vault.js'
+import { encrypt, generateIV, deriveKey } from '../crypto/vault.js'
 
 const router = useRouter()
 const auth = useAuthStore()
-const crypto = useCryptoStore()
 const secrets = useSecretsStore()
 
 const alias = ref('')
@@ -52,22 +50,56 @@ const isValid = computed(() => {
   return currentFields.value.some(([key]) => fields.value[key]?.trim())
 })
 
+// ─── Modal de PIN+frase ────────────────────────────────────────────────────
+
+/** Controla si el modal de PIN+frase está visible */
+const showPinModal = ref(false)
+const pinInput = ref('')
+const phraseInput = ref('')
+const pinError = ref('')
+const showPhrase = ref(false)
+const pinLoading = ref(false)
+
+/** Blob pendiente de cifrar (se construye en submit y se usa en confirmPin) */
+const pendingBlob = ref(null)
+
 /**
- * Cifra el blob y envía el secreto al backend.
+ * Construye el blob y muestra el modal de PIN+frase.
  */
 async function submit() {
   if (!isValid.value) return
-  loading.value = true
   error.value = ''
 
-  try {
-    const blob = {}
-    for (const [key] of currentFields.value) {
-      blob[key] = fields.value[key] ?? ''
-    }
+  const blob = {}
+  for (const [key] of currentFields.value) {
+    blob[key] = fields.value[key] ?? ''
+  }
+  pendingBlob.value = blob
+  showPinModal.value = true
+  pinInput.value = ''
+  phraseInput.value = ''
+  pinError.value = ''
 
+  await nextTick()
+  document.getElementById('new-pin-input')?.focus()
+}
+
+/**
+ * Deriva la clave con PIN+frase, cifra el blob y lo envía al backend.
+ */
+async function confirmPin() {
+  if (!pinInput.value.trim() || !phraseInput.value.trim()) {
+    pinError.value = 'Ingresa tu PIN y frase de seguridad.'
+    return
+  }
+  pinError.value = ''
+  pinLoading.value = true
+  loading.value = true
+
+  try {
+    const key = await deriveKey(pinInput.value, phraseInput.value, auth.salt)
     const iv = generateIV()
-    const encrypted = await encrypt(blob, crypto.encryptionKey, iv)
+    const encrypted = await encrypt(pendingBlob.value, key, iv)
 
     const { data } = await secretsApi.create({
       alias: alias.value.trim(),
@@ -77,12 +109,26 @@ async function submit() {
     })
 
     secrets.add(data)
+    showPinModal.value = false
     router.push('/vault')
-  } catch {
-    error.value = 'No se pudo guardar el secreto. Intenta de nuevo.'
+  } catch (err) {
+    if (!err.response) {
+      pinError.value = 'No se puede conectar al servidor.'
+    } else {
+      pinError.value = 'No se pudo guardar el secreto. Intenta de nuevo.'
+    }
   } finally {
+    pinLoading.value = false
     loading.value = false
   }
+}
+
+function cancelPin() {
+  showPinModal.value = false
+  pendingBlob.value = null
+  pinInput.value = ''
+  phraseInput.value = ''
+  pinError.value = ''
 }
 </script>
 
@@ -179,6 +225,68 @@ async function submit() {
         </button>
       </form>
     </main>
+
+    <!-- Modal PIN+frase para cifrar -->
+    <Transition name="modal">
+      <div v-if="showPinModal" class="modal-overlay" @click.self="cancelPin">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <h2 id="modal-title" class="modal-title">Cifrar secreto</h2>
+          <p class="modal-hint">
+            Ingresa tu PIN y frase de seguridad para cifrar este secreto.
+          </p>
+
+          <form class="modal-form" @submit.prevent="confirmPin" novalidate>
+            <div class="field">
+              <label class="field-label" for="new-pin-input">PIN</label>
+              <input
+                id="new-pin-input"
+                v-model="pinInput"
+                type="password"
+                class="field-input field-input--pin"
+                placeholder="· · · ·"
+                inputmode="numeric"
+                maxlength="16"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="new-phrase-input">
+                Frase de seguridad
+                <button
+                  type="button"
+                  class="toggle-visibility"
+                  @click="showPhrase = !showPhrase"
+                  :aria-label="showPhrase ? 'Ocultar frase' : 'Mostrar frase'"
+                >
+                  {{ showPhrase ? 'ocultar' : 'mostrar' }}
+                </button>
+              </label>
+              <input
+                id="new-phrase-input"
+                v-model="phraseInput"
+                :type="showPhrase ? 'text' : 'password'"
+                class="field-input"
+                placeholder="tu frase secreta"
+                autocomplete="off"
+              />
+            </div>
+
+            <p v-if="pinError" class="form-error" role="alert">{{ pinError }}</p>
+
+            <div class="modal-actions">
+              <button type="button" class="btn-ghost" @click="cancelPin">Cancelar</button>
+              <button type="submit" class="btn-primary" :disabled="pinLoading">
+                <span v-if="!pinLoading">Cifrar y guardar</span>
+                <span v-else class="btn-loading" aria-label="Guardando">
+                  <span class="dot" /><span class="dot" /><span class="dot" />
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -269,6 +377,9 @@ async function submit() {
 .field { display: flex; flex-direction: column; gap: 0.375rem; }
 
 .field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.67rem; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--c-text-muted);
 }
@@ -293,6 +404,12 @@ async function submit() {
   border-color: var(--c-border-focus);
   background: rgba(54, 129, 106, 0.04);
   box-shadow: 0 0 0 3px rgba(54, 129, 106, 0.08);
+}
+
+.field-input--pin {
+  letter-spacing: 0.35em;
+  text-align: center;
+  font-size: 1rem;
 }
 
 .field-textarea {
@@ -379,6 +496,14 @@ async function submit() {
 .btn-primary:active:not(:disabled) { transform: translateY(0); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.btn-ghost {
+  background: none; border: none; padding: 0.3rem;
+  color: var(--c-text-muted); font-family: var(--font-mono);
+  font-size: 0.7rem; cursor: pointer; text-align: center;
+  transition: color 150ms var(--ease); letter-spacing: 0.04em;
+}
+.btn-ghost:hover { color: var(--c-text); }
+
 .btn-loading { display: flex; gap: 4px; align-items: center; }
 .dot {
   width: 4px; height: 4px; border-radius: 50%; background: currentColor;
@@ -389,5 +514,90 @@ async function submit() {
 @keyframes pulse {
   0%, 80%, 100% { opacity: 0.15; transform: scale(0.75); }
   40%            { opacity: 1;   transform: scale(1); }
+}
+
+.toggle-visibility {
+  background: none; border: none; padding: 0;
+  color: var(--c-accent); font-family: var(--font-mono);
+  font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
+  cursor: pointer; opacity: 0.75;
+  transition: opacity 150ms var(--ease);
+}
+.toggle-visibility:hover { opacity: 1; }
+
+/* ─── Modal ───────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 1.5rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 24px 48px rgba(0, 0, 0, 0.7);
+}
+
+.modal-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--c-text);
+  margin: 0 0 0.5rem;
+}
+
+.modal-hint {
+  font-size: 0.72rem;
+  color: var(--c-text-muted);
+  line-height: 1.6;
+  margin: 0 0 1.25rem;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+/* ─── Modal transition ────────────────────────── */
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 200ms var(--ease);
+}
+.modal-enter-active .modal-card,
+.modal-leave-active .modal-card {
+  transition: transform 200ms var(--ease), opacity 200ms var(--ease);
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-card,
+.modal-leave-to .modal-card {
+  transform: scale(0.95);
+  opacity: 0;
 }
 </style>
