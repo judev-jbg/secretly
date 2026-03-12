@@ -1,12 +1,11 @@
 /**
  * @fileoverview Configuración de rutas y navigation guards.
- * - Rutas públicas: /login, /register, /forgot-password, /reset-password
- * - Rutas protegidas: /vault, /vault/new (requieren isAuthenticated + hasKey)
+ * - Rutas públicas: /login, /register, /reset-password
+ * - Rutas protegidas: /vault, /vault/new (requieren isAuthenticated)
  */
 
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -25,12 +24,6 @@ const router = createRouter({
       path: '/register',
       name: 'register',
       component: () => import('../views/RegisterView.vue'),
-      meta: { public: true },
-    },
-    {
-      path: '/forgot-password',
-      name: 'forgot-password',
-      component: () => import('../views/ForgotPasswordView.vue'),
       meta: { public: true },
     },
     {
@@ -60,14 +53,13 @@ const router = createRouter({
 
 /**
  * Guard global: protege rutas que requieren autenticación.
- * Redirige a /login si no hay sesión activa o no hay clave en memoria.
+ * Redirige a /login si no hay sesión activa.
  * Redirige a /vault si un usuario autenticado intenta acceder a una ruta pública.
  */
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  const crypto = useCryptoStore()
 
-  const isAuthenticated = auth.isAuthenticated && crypto.hasKey
+  const isAuthenticated = auth.isAuthenticated
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     return { name: 'login' }

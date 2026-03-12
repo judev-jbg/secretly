@@ -11,6 +11,8 @@ import { authApi } from '../services/api.js'
 const route = useRoute()
 const router = useRouter()
 
+/** Token: pre-relleno desde la URL si llega por query string, editable por el usuario */
+const token = ref(route.query.token ?? '')
 const password = ref('')
 const confirm = ref('')
 const status = ref('')
@@ -18,17 +20,14 @@ const error = ref('')
 const loading = ref(false)
 const done = ref(false)
 
-/** @type {string} Token extraído de la URL */
-const token = computed(() => route.query.token ?? '')
-
 const mismatch = computed(() => confirm.value && password.value !== confirm.value)
 
 async function submit() {
-  if (mismatch.value || !token.value) return
+  if (mismatch.value || !token.value.trim()) return
   error.value = ''
   loading.value = true
   try {
-    await authApi.resetPassword({ token: token.value, new_password: password.value })
+    await authApi.resetPassword({ token: token.value.trim(), new_password: password.value })
     done.value = true
     status.value = 'Contraseña restablecida. Redirigiendo...'
     setTimeout(() => router.push('/login'), 2000)
@@ -59,8 +58,22 @@ async function submit() {
 
       <form v-if="!done" class="login-form" @submit.prevent="submit" novalidate>
         <p class="step-hint">
-          Elige una contraseña segura. Tu PIN y frase de seguridad no cambiarán.
+          Pega el token que recibiste en el email y elige una contraseña nueva.
+          Tu PIN y frase de seguridad no cambiarán.
         </p>
+
+        <div class="field">
+          <label class="field-label" for="reset-token">Token de recuperación</label>
+          <input
+            id="reset-token"
+            v-model="token"
+            type="text"
+            class="field-input field-input--token"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            autocomplete="off"
+            required
+          />
+        </div>
 
         <div class="field">
           <label class="field-label" for="password">Nueva contraseña</label>
@@ -96,7 +109,7 @@ async function submit() {
         <button
           type="submit"
           class="btn-primary"
-          :disabled="loading || !password || !confirm || !!mismatch || !token"
+          :disabled="loading || !token.trim() || !password || !confirm || !!mismatch"
         >
           <span v-if="!loading">Restablecer contraseña</span>
           <span v-else class="btn-loading" aria-label="Procesando">
@@ -233,6 +246,12 @@ async function submit() {
   border-color: var(--c-border-focus);
   background: rgba(54, 129, 106, 0.04);
   box-shadow: 0 0 0 3px rgba(54, 129, 106, 0.08);
+}
+
+.field-input--token {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--c-accent);
 }
 
 .field-input--error {
