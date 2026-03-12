@@ -202,11 +202,15 @@ function backToCredentials() {
           <p v-if="forgotStatus" class="form-success" role="status">{{ forgotStatus }}</p>
 
           <button type="submit" class="btn-primary" :disabled="forgotLoading || !!forgotStatus">
-            <span v-if="!forgotLoading">Enviar enlace</span>
+            <span v-if="!forgotLoading">Enviar email</span>
             <span v-else class="btn-loading" aria-label="Enviando">
               <span class="dot" /><span class="dot" /><span class="dot" />
             </span>
           </button>
+
+          <RouterLink v-if="forgotStatus" to="/reset-password" class="btn-primary btn-primary--outline">
+            Ingresar token →
+          </RouterLink>
 
           <button
             type="button"
@@ -533,6 +537,17 @@ function backToCredentials() {
 
 .btn-primary:active:not(:disabled) { transform: translateY(0); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary--outline {
+  background: transparent;
+  border: 1px solid var(--c-accent);
+  color: var(--c-accent);
+}
+
+.btn-primary--outline:hover:not(:disabled) {
+  background: var(--c-accent-dim);
+  transform: translateY(-1px);
+}
 
 .btn-ghost {
   background: none;

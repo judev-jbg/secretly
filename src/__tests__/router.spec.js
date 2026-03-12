@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 
 // ─── Guard extraído para testing unitario ──────────────────────────────────
 
@@ -20,8 +19,7 @@ import { useCryptoStore } from '../stores/crypto.js'
  */
 function guard(to) {
   const auth = useAuthStore()
-  const crypto = useCryptoStore()
-  const isAuthenticated = auth.isAuthenticated && crypto.hasKey
+  const isAuthenticated = auth.isAuthenticated
 
   if (to.meta.requiresAuth && !isAuthenticated) return { name: 'login' }
   if (to.meta.public && isAuthenticated) return { name: 'vault' }
@@ -32,12 +30,10 @@ function guard(to) {
 
 function loginUser() {
   useAuthStore().setSession({ token: 'jwt', refreshToken: 'rt', email: 'a@b.com', salt: 's' })
-  useCryptoStore().setKey({ type: 'secret' })
 }
 
 function logoutUser() {
   useAuthStore().clear()
-  useCryptoStore().clear()
 }
 
 beforeEach(() => {
@@ -71,18 +67,12 @@ describe('guard — rutas protegidas', () => {
     expect(guard({ meta: { requiresAuth: true } })).toEqual({ name: 'login' })
   })
 
-  it('redirige /vault a login si hay JWT pero no hay clave en memoria', () => {
-    useAuthStore().setSession({ token: 'jwt', refreshToken: 'rt', email: 'a@b.com', salt: 's' })
-    useCryptoStore().clear()
-    expect(guard({ meta: { requiresAuth: true } })).toEqual({ name: 'login' })
-  })
-
-  it('permite /vault con sesión completa', () => {
+  it('permite /vault con sesión activa', () => {
     loginUser()
     expect(guard({ meta: { requiresAuth: true } })).toBeUndefined()
   })
 
-  it('permite /vault/new con sesión completa', () => {
+  it('permite /vault/new con sesión activa', () => {
     loginUser()
     expect(guard({ meta: { requiresAuth: true } })).toBeUndefined()
   })
@@ -105,10 +95,10 @@ describe('definición de rutas', () => {
     const names = router.getRoutes().map((r) => r.name).filter(Boolean)
 
     expect(names).toContain('login')
-    expect(names).toContain('forgot-password')
     expect(names).toContain('reset-password')
     expect(names).toContain('vault')
     expect(names).toContain('vault-new')
+    expect(names).not.toContain('forgot-password')
   })
 
   it('las rutas del vault tienen meta requiresAuth', async () => {
@@ -120,7 +110,7 @@ describe('definición de rutas', () => {
   it('las rutas públicas tienen meta public', async () => {
     const { default: router } = await import('../router/index.js')
     const publicRoutes = router.getRoutes().filter((r) =>
-      ['login', 'forgot-password', 'reset-password'].includes(r.name),
+      ['login', 'reset-password'].includes(r.name),
     )
     publicRoutes.forEach((r) => expect(r.meta.public).toBe(true))
   })
