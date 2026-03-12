@@ -1,46 +1,70 @@
 <script setup>
 /**
- * @fileoverview Vista de login — flujo completo de autenticación.
- * Paso 1: email + password → JWT + salt
- * Paso 2: PIN + frase → deriveKey → cryptoStore
+ * @fileoverview Vista de registro de nuevo usuario.
+ * Paso 1: email + password + confirmación → genera salt → POST /auth/register
+ * Paso 2: PIN + frase → deriveKey → cryptoStore → /vault
+ *
+ * El salt se genera en el navegador y se envía al backend para almacenarlo.
+ * La encryption_key nunca sale del dispositivo.
  */
 
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { useCryptoStore } from '../stores/crypto.js'
 import { authApi } from '../services/api.js'
-import { deriveKey } from '../crypto/vault.js'
+import { generateSalt, deriveKey } from '../crypto/vault.js'
 
 const router = useRouter()
 const auth = useAuthStore()
 const crypto = useCryptoStore()
 
 // ─── Pasos del flujo ───────────────────────────────────────────────────────
-const step = ref('credentials') // 'credentials' | 'pin'
+const step = ref('account') // 'account' | 'pin'
 
-// ─── Paso 1: credentials ──────────────────────────────────────────────────
-const credentials = reactive({ email: '', password: '' })
-const credError = ref('')
-const credLoading = ref(false)
+// ─── Paso 1: cuenta ────────────────────────────────────────────────────────
+const account = reactive({ email: '', password: '', confirm: '' })
+const accountError = ref('')
+const accountLoading = ref(false)
 const sessionData = reactive({ token: '', refreshToken: '', salt: '' })
 
-async function submitCredentials() {
-  credError.value = ''
-  credLoading.value = true
+/** @returns {boolean} true si el password y la confirmación coinciden y tienen >= 8 chars */
+const passwordsMatch = computed(
+  () => account.password.length >= 8 && account.password === account.confirm,
+)
+
+/** @returns {boolean} true si el formulario de cuenta es válido */
+const isAccountValid = computed(() => account.email.trim() && passwordsMatch.value)
+
+/**
+ * Genera salt, registra al usuario y avanza al paso de PIN.
+ */
+async function submitAccount() {
+  if (!isAccountValid.value) return
+  accountError.value = ''
+  accountLoading.value = true
+
   try {
-    const { data } = await authApi.login({
-      email: credentials.email,
-      password: credentials.password,
+    const salt = generateSalt()
+    const { data } = await authApi.register({
+      email: account.email.trim(),
+      password: account.password,
+      salt,
     })
+
     sessionData.token = data.access_token
     sessionData.refreshToken = data.refresh_token
-    sessionData.salt = data.salt
+    sessionData.salt = salt
     step.value = 'pin'
-  } catch {
-    credError.value = 'Credenciales incorrectas.'
+  } catch (err) {
+    const status = err.response?.status
+    if (status === 409) {
+      accountError.value = 'Este email ya está registrado.'
+    } else {
+      accountError.value = 'Error al crear la cuenta. Intenta de nuevo.'
+    }
   } finally {
-    credLoading.value = false
+    accountLoading.value = false
   }
 }
 
@@ -51,6 +75,9 @@ const pinError = ref('')
 const pinLoading = ref(false)
 const showPhrase = ref(false)
 
+/**
+ * Deriva la encryption_key con PIN + frase, establece la sesión y redirige al vault.
+ */
 async function submitPin() {
   if (!pin.value || !phrase.value) {
     pinError.value = 'Ingresa tu PIN y frase de seguridad.'
@@ -58,12 +85,13 @@ async function submitPin() {
   }
   pinError.value = ''
   pinLoading.value = true
+
   try {
     const encryptionKey = await deriveKey(pin.value, phrase.value, sessionData.salt)
     auth.setSession({
       token: sessionData.token,
       refreshToken: sessionData.refreshToken,
-      email: credentials.email,
+      email: account.email,
       salt: sessionData.salt,
     })
     crypto.setKey(encryptionKey)
@@ -75,25 +103,8 @@ async function submitPin() {
   }
 }
 
-// ─── Recuperar contraseña ─────────────────────────────────────────────────
-const showForgot = ref(false)
-const forgotEmail = ref('')
-const forgotStatus = ref('')
-const forgotLoading = ref(false)
-
-async function submitForgot() {
-  forgotLoading.value = true
-  try {
-    await authApi.forgotPassword({ email: forgotEmail.value })
-  } finally {
-    // Siempre el mismo mensaje (anti-enumeration)
-    forgotStatus.value = 'Si el email existe, recibirás un enlace de recuperación.'
-    forgotLoading.value = false
-  }
-}
-
-function backToCredentials() {
-  step.value = 'credentials'
+function backToAccount() {
+  step.value = 'account'
   pin.value = ''
   phrase.value = ''
   pinError.value = ''
@@ -102,39 +113,39 @@ function backToCredentials() {
 </script>
 
 <template>
-  <div class="login-shell">
+  <div class="register-shell">
     <div class="bg-grid" aria-hidden="true" />
     <div class="bg-vignette" aria-hidden="true" />
 
-    <main class="login-card">
-      <header class="login-header">
+    <main class="register-card">
+      <header class="register-header">
         <div class="logo-mark">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="11" width="18" height="11" rx="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
         </div>
-        <h1 class="login-title">secretly</h1>
-        <p class="login-subtitle">
-          {{ step === 'credentials' ? 'acceso seguro' : 'desbloquea tu vault' }}
+        <h1 class="register-title">secretly</h1>
+        <p class="register-subtitle">
+          {{ step === 'account' ? 'crea tu cuenta' : 'configura tu vault' }}
         </p>
       </header>
 
       <Transition name="slide" mode="out-in">
 
-        <!-- Paso 1: credenciales -->
+        <!-- Paso 1: datos de cuenta -->
         <form
-          v-if="step === 'credentials' && !showForgot"
-          key="credentials"
-          class="login-form"
-          @submit.prevent="submitCredentials"
+          v-if="step === 'account'"
+          key="account"
+          class="register-form"
+          @submit.prevent="submitAccount"
           novalidate
         >
           <div class="field">
-            <label class="field-label" for="email">Email</label>
+            <label class="field-label" for="reg-email">Email</label>
             <input
-              id="email"
-              v-model="credentials.email"
+              id="reg-email"
+              v-model="account.email"
               type="email"
               class="field-input"
               placeholder="tu@email.com"
@@ -144,96 +155,68 @@ function backToCredentials() {
           </div>
 
           <div class="field">
-            <label class="field-label" for="password">Contraseña</label>
+            <label class="field-label" for="reg-password">Contraseña</label>
             <input
-              id="password"
-              v-model="credentials.password"
+              id="reg-password"
+              v-model="account.password"
               type="password"
               class="field-input"
-              placeholder="••••••••"
-              autocomplete="current-password"
+              placeholder="mínimo 8 caracteres"
+              autocomplete="new-password"
               required
             />
           </div>
-
-          <p v-if="credError" class="form-error" role="alert">{{ credError }}</p>
-
-          <button type="submit" class="btn-primary" :disabled="credLoading">
-            <span v-if="!credLoading">Continuar</span>
-            <span v-else class="btn-loading" aria-label="Cargando">
-              <span class="dot" /><span class="dot" /><span class="dot" />
-            </span>
-          </button>
-
-          <button type="button" class="btn-ghost" @click="showForgot = true">
-            ¿Olvidaste tu contraseña?
-          </button>
-
-          <RouterLink to="/register" class="btn-ghost">
-            ¿No tienes cuenta? Regístrate
-          </RouterLink>
-        </form>
-
-        <!-- Recuperar contraseña -->
-        <form
-          v-else-if="showForgot"
-          key="forgot"
-          class="login-form"
-          @submit.prevent="submitForgot"
-          novalidate
-        >
-          <p class="step-hint">
-            Ingresa tu email y te enviaremos un enlace para restablecer tu contraseña.
-          </p>
 
           <div class="field">
-            <label class="field-label" for="forgot-email">Email</label>
+            <label class="field-label" for="reg-confirm">Confirmar contraseña</label>
             <input
-              id="forgot-email"
-              v-model="forgotEmail"
-              type="email"
+              id="reg-confirm"
+              v-model="account.confirm"
+              type="password"
               class="field-input"
-              placeholder="tu@email.com"
-              autocomplete="email"
+              placeholder="repite la contraseña"
+              autocomplete="new-password"
               required
             />
+            <span
+              v-if="account.confirm && !passwordsMatch"
+              class="field-hint field-hint--error"
+            >
+              Las contraseñas no coinciden o tienen menos de 8 caracteres.
+            </span>
           </div>
 
-          <p v-if="forgotStatus" class="form-success" role="status">{{ forgotStatus }}</p>
+          <p v-if="accountError" class="form-error" role="alert">{{ accountError }}</p>
 
-          <button type="submit" class="btn-primary" :disabled="forgotLoading || !!forgotStatus">
-            <span v-if="!forgotLoading">Enviar enlace</span>
-            <span v-else class="btn-loading" aria-label="Enviando">
+          <button type="submit" class="btn-primary" :disabled="accountLoading || !isAccountValid">
+            <span v-if="!accountLoading">Crear cuenta</span>
+            <span v-else class="btn-loading" aria-label="Creando cuenta">
               <span class="dot" /><span class="dot" /><span class="dot" />
             </span>
           </button>
 
-          <button
-            type="button"
-            class="btn-ghost"
-            @click="showForgot = false; forgotStatus = ''"
-          >
-            ← Volver
-          </button>
+          <RouterLink to="/login" class="btn-ghost">
+            ¿Ya tienes cuenta? Inicia sesión
+          </RouterLink>
         </form>
 
         <!-- Paso 2: PIN + frase -->
         <form
           v-else-if="step === 'pin'"
           key="pin"
-          class="login-form"
+          class="register-form"
           @submit.prevent="submitPin"
           novalidate
         >
           <p class="step-hint">
-            Ingresa tu PIN y frase de seguridad para desbloquear el vault.
-            Estas credenciales nunca salen de tu dispositivo.
+            Configura tu PIN y frase de seguridad. Estos datos cifran tus secretos
+            y nunca salen de tu dispositivo. <strong>No podrás recuperarlos si los olvidas.</strong>
           </p>
 
           <div class="field">
-            <label class="field-label" for="pin">PIN</label>
+            <label class="field-label" for="reg-pin">PIN</label>
             <input
-              id="pin"
+              id="reg-pin"
               v-model="pin"
               type="password"
               class="field-input field-input--pin"
@@ -245,7 +228,7 @@ function backToCredentials() {
           </div>
 
           <div class="field">
-            <label class="field-label" for="phrase">
+            <label class="field-label" for="reg-phrase">
               Frase de seguridad
               <button
                 type="button"
@@ -257,11 +240,11 @@ function backToCredentials() {
               </button>
             </label>
             <input
-              id="phrase"
+              id="reg-phrase"
               v-model="phrase"
               :type="showPhrase ? 'text' : 'password'"
               class="field-input"
-              placeholder="tu frase secreta"
+              placeholder="una frase que solo tú conozcas"
               autocomplete="off"
             />
           </div>
@@ -269,21 +252,21 @@ function backToCredentials() {
           <p v-if="pinError" class="form-error" role="alert">{{ pinError }}</p>
 
           <button type="submit" class="btn-primary" :disabled="pinLoading">
-            <span v-if="!pinLoading">Desbloquear vault</span>
-            <span v-else class="btn-loading" aria-label="Desbloqueando">
+            <span v-if="!pinLoading">Activar vault</span>
+            <span v-else class="btn-loading" aria-label="Configurando">
               <span class="dot" /><span class="dot" /><span class="dot" />
             </span>
           </button>
 
-          <button type="button" class="btn-ghost" @click="backToCredentials">
-            ← Cambiar cuenta
+          <button type="button" class="btn-ghost" @click="backToAccount">
+            ← Volver
           </button>
         </form>
 
       </Transition>
 
       <div class="step-dots" aria-hidden="true">
-        <span class="step-dot" :class="{ active: step === 'credentials' }" />
+        <span class="step-dot" :class="{ active: step === 'account' }" />
         <span class="step-dot" :class="{ active: step === 'pin' }" />
       </div>
     </main>
@@ -292,7 +275,7 @@ function backToCredentials() {
 
 <style scoped>
 /* ─── Variables ─────────────────────────────────────────────────── */
-.login-shell {
+.register-shell {
   --c-bg: #090a0c;
   --c-surface: #0e1014;
   --c-border: #1a1f26;
@@ -310,7 +293,7 @@ function backToCredentials() {
 }
 
 /* ─── Shell ─────────────────────────────────────────────────────── */
-.login-shell {
+.register-shell {
   min-height: 100dvh;
   display: flex;
   align-items: center;
@@ -339,7 +322,7 @@ function backToCredentials() {
 }
 
 /* ─── Card ──────────────────────────────────────────────────────── */
-.login-card {
+.register-card {
   position: relative;
   z-index: 1;
   width: 100%;
@@ -361,7 +344,7 @@ function backToCredentials() {
 }
 
 /* ─── Header ────────────────────────────────────────────────────── */
-.login-header {
+.register-header {
   text-align: center;
   margin-bottom: 1.875rem;
 }
@@ -382,7 +365,7 @@ function backToCredentials() {
 
 .logo-mark svg { width: 100%; height: 100%; }
 
-.login-title {
+.register-title {
   font-size: 1.375rem;
   font-weight: 700;
   letter-spacing: -0.04em;
@@ -390,7 +373,7 @@ function backToCredentials() {
   margin: 0 0 0.25rem;
 }
 
-.login-subtitle {
+.register-subtitle {
   font-size: 0.68rem;
   color: var(--c-text-muted);
   letter-spacing: 0.14em;
@@ -399,7 +382,7 @@ function backToCredentials() {
 }
 
 /* ─── Formulario ────────────────────────────────────────────────── */
-.login-form {
+.register-form {
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -416,6 +399,11 @@ function backToCredentials() {
   background: rgba(54, 129, 106, 0.05);
 }
 
+.step-hint strong {
+  color: var(--c-error);
+  font-weight: 600;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -430,6 +418,18 @@ function backToCredentials() {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--c-text-muted);
+}
+
+.field-hint {
+  font-size: 0.62rem;
+  color: var(--c-text-muted);
+  opacity: 0.6;
+  letter-spacing: 0.04em;
+}
+
+.field-hint--error {
+  color: var(--c-error);
+  opacity: 1;
 }
 
 .toggle-visibility {
@@ -493,16 +493,6 @@ function backToCredentials() {
   border-radius: var(--radius);
 }
 
-.form-success {
-  font-size: 0.72rem;
-  color: var(--c-success);
-  margin: 0;
-  padding: 0.5rem 0.7rem;
-  background: rgba(54, 129, 106, 0.07);
-  border: 1px solid rgba(54, 129, 106, 0.18);
-  border-radius: var(--radius);
-}
-
 /* ─── Botones ───────────────────────────────────────────────────── */
 .btn-primary {
   padding: 0.7rem 1rem;
@@ -545,6 +535,8 @@ function backToCredentials() {
   text-align: center;
   transition: color 150ms var(--ease);
   letter-spacing: 0.04em;
+  text-decoration: none;
+  display: block;
 }
 
 .btn-ghost:hover { color: var(--c-text); }
@@ -611,7 +603,7 @@ function backToCredentials() {
 
 /* ─── Mobile ────────────────────────────────────────────────────── */
 @media (max-width: 420px) {
-  .login-card {
+  .register-card {
     margin: 1rem;
     padding: 1.875rem 1.375rem;
     border-radius: 8px;

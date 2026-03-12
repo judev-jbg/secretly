@@ -1,6 +1,6 @@
 /**
  * @fileoverview Configuración de rutas y navigation guards.
- * - Rutas públicas: /login, /forgot-password, /reset-password
+ * - Rutas públicas: /login, /register, /forgot-password, /reset-password
  * - Rutas protegidas: /vault, /vault/new (requieren isAuthenticated + hasKey)
  */
 
@@ -19,6 +19,12 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
+      meta: { public: true },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue'),
       meta: { public: true },
     },
     {
