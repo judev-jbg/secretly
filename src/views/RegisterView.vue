@@ -1,43 +1,34 @@
 <script setup>
 /**
  * @fileoverview Vista de registro de nuevo usuario.
- * Paso 1: email + password + confirmación → genera salt → POST /auth/register
- * Paso 2: PIN + frase → deriveKey → cryptoStore → /vault
- *
+ * email + password + confirmación → genera salt → POST /auth/register → setSession → /vault
  * El salt se genera en el navegador y se envía al backend para almacenarlo.
- * La encryption_key nunca sale del dispositivo.
  */
 
 import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import { useCryptoStore } from '../stores/crypto.js'
 import { authApi } from '../services/api.js'
-import { generateSalt, deriveKey } from '../crypto/vault.js'
+import { generateSalt } from '../crypto/vault.js'
 
 const router = useRouter()
 const auth = useAuthStore()
-const crypto = useCryptoStore()
 
-// ─── Pasos del flujo ───────────────────────────────────────────────────────
-const step = ref('account') // 'account' | 'pin'
-
-// ─── Paso 1: cuenta ────────────────────────────────────────────────────────
 const account = reactive({ email: '', password: '', confirm: '' })
 const accountError = ref('')
 const accountLoading = ref(false)
-const sessionData = reactive({ token: '', refreshToken: '', salt: '' })
 
 /** @returns {boolean} true si el password y la confirmación coinciden y tienen >= 8 chars */
 const passwordsMatch = computed(
   () => account.password.length >= 8 && account.password === account.confirm,
 )
 
-/** @returns {boolean} true si el formulario de cuenta es válido */
+/** @returns {boolean} true si el formulario es válido */
 const isAccountValid = computed(() => account.email.trim() && passwordsMatch.value)
 
 /**
- * Genera salt, registra al usuario y avanza al paso de PIN.
+ * Genera salt, registra al usuario y redirige al vault.
+ * Distingue error de red de errores de la API.
  */
 async function submitAccount() {
   if (!isAccountValid.value) return
@@ -51,14 +42,17 @@ async function submitAccount() {
       password: account.password,
       salt,
     })
-
-    sessionData.token = data.access_token
-    sessionData.refreshToken = data.refresh_token
-    sessionData.salt = salt
-    step.value = 'pin'
+    auth.setSession({
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+      email: account.email.trim(),
+      salt,
+    })
+    router.push('/vault')
   } catch (err) {
-    const status = err.response?.status
-    if (status === 409) {
+    if (!err.response) {
+      accountError.value = 'No se puede conectar al servidor. Verifica tu conexión.'
+    } else if (err.response.status === 409) {
       accountError.value = 'Este email ya está registrado.'
     } else {
       accountError.value = 'Error al crear la cuenta. Intenta de nuevo.'
@@ -66,49 +60,6 @@ async function submitAccount() {
   } finally {
     accountLoading.value = false
   }
-}
-
-// ─── Paso 2: PIN + frase ──────────────────────────────────────────────────
-const pin = ref('')
-const phrase = ref('')
-const pinError = ref('')
-const pinLoading = ref(false)
-const showPhrase = ref(false)
-
-/**
- * Deriva la encryption_key con PIN + frase, establece la sesión y redirige al vault.
- */
-async function submitPin() {
-  if (!pin.value || !phrase.value) {
-    pinError.value = 'Ingresa tu PIN y frase de seguridad.'
-    return
-  }
-  pinError.value = ''
-  pinLoading.value = true
-
-  try {
-    const encryptionKey = await deriveKey(pin.value, phrase.value, sessionData.salt)
-    auth.setSession({
-      token: sessionData.token,
-      refreshToken: sessionData.refreshToken,
-      email: account.email,
-      salt: sessionData.salt,
-    })
-    crypto.setKey(encryptionKey)
-    router.push('/vault')
-  } catch {
-    pinError.value = 'Error al derivar la clave. Intenta de nuevo.'
-  } finally {
-    pinLoading.value = false
-  }
-}
-
-function backToAccount() {
-  step.value = 'account'
-  pin.value = ''
-  phrase.value = ''
-  pinError.value = ''
-  Object.assign(sessionData, { token: '', refreshToken: '', salt: '' })
 }
 </script>
 
@@ -126,149 +77,72 @@ function backToAccount() {
           </svg>
         </div>
         <h1 class="register-title">secretly</h1>
-        <p class="register-subtitle">
-          {{ step === 'account' ? 'crea tu cuenta' : 'configura tu vault' }}
-        </p>
+        <p class="register-subtitle">crea tu cuenta</p>
       </header>
 
-      <Transition name="slide" mode="out-in">
+      <form
+        class="register-form"
+        @submit.prevent="submitAccount"
+        novalidate
+      >
+        <div class="field">
+          <label class="field-label" for="reg-email">Email</label>
+          <input
+            id="reg-email"
+            v-model="account.email"
+            type="email"
+            class="field-input"
+            placeholder="tu@email.com"
+            autocomplete="email"
+            required
+          />
+        </div>
 
-        <!-- Paso 1: datos de cuenta -->
-        <form
-          v-if="step === 'account'"
-          key="account"
-          class="register-form"
-          @submit.prevent="submitAccount"
-          novalidate
-        >
-          <div class="field">
-            <label class="field-label" for="reg-email">Email</label>
-            <input
-              id="reg-email"
-              v-model="account.email"
-              type="email"
-              class="field-input"
-              placeholder="tu@email.com"
-              autocomplete="email"
-              required
-            />
-          </div>
+        <div class="field">
+          <label class="field-label" for="reg-password">Contraseña</label>
+          <input
+            id="reg-password"
+            v-model="account.password"
+            type="password"
+            class="field-input"
+            placeholder="mínimo 8 caracteres"
+            autocomplete="new-password"
+            required
+          />
+        </div>
 
-          <div class="field">
-            <label class="field-label" for="reg-password">Contraseña</label>
-            <input
-              id="reg-password"
-              v-model="account.password"
-              type="password"
-              class="field-input"
-              placeholder="mínimo 8 caracteres"
-              autocomplete="new-password"
-              required
-            />
-          </div>
+        <div class="field">
+          <label class="field-label" for="reg-confirm">Confirmar contraseña</label>
+          <input
+            id="reg-confirm"
+            v-model="account.confirm"
+            type="password"
+            class="field-input"
+            placeholder="repite la contraseña"
+            autocomplete="new-password"
+            required
+          />
+          <span
+            v-if="account.confirm && !passwordsMatch"
+            class="field-hint field-hint--error"
+          >
+            Las contraseñas no coinciden o tienen menos de 8 caracteres.
+          </span>
+        </div>
 
-          <div class="field">
-            <label class="field-label" for="reg-confirm">Confirmar contraseña</label>
-            <input
-              id="reg-confirm"
-              v-model="account.confirm"
-              type="password"
-              class="field-input"
-              placeholder="repite la contraseña"
-              autocomplete="new-password"
-              required
-            />
-            <span
-              v-if="account.confirm && !passwordsMatch"
-              class="field-hint field-hint--error"
-            >
-              Las contraseñas no coinciden o tienen menos de 8 caracteres.
-            </span>
-          </div>
+        <p v-if="accountError" class="form-error" role="alert">{{ accountError }}</p>
 
-          <p v-if="accountError" class="form-error" role="alert">{{ accountError }}</p>
+        <button type="submit" class="btn-primary" :disabled="accountLoading || !isAccountValid">
+          <span v-if="!accountLoading">Crear cuenta</span>
+          <span v-else class="btn-loading" aria-label="Creando cuenta">
+            <span class="dot" /><span class="dot" /><span class="dot" />
+          </span>
+        </button>
 
-          <button type="submit" class="btn-primary" :disabled="accountLoading || !isAccountValid">
-            <span v-if="!accountLoading">Crear cuenta</span>
-            <span v-else class="btn-loading" aria-label="Creando cuenta">
-              <span class="dot" /><span class="dot" /><span class="dot" />
-            </span>
-          </button>
-
-          <RouterLink to="/login" class="btn-ghost">
-            ¿Ya tienes cuenta? Inicia sesión
-          </RouterLink>
-        </form>
-
-        <!-- Paso 2: PIN + frase -->
-        <form
-          v-else-if="step === 'pin'"
-          key="pin"
-          class="register-form"
-          @submit.prevent="submitPin"
-          novalidate
-        >
-          <p class="step-hint">
-            Configura tu PIN y frase de seguridad. Estos datos cifran tus secretos
-            y nunca salen de tu dispositivo. <strong>No podrás recuperarlos si los olvidas.</strong>
-          </p>
-
-          <div class="field">
-            <label class="field-label" for="reg-pin">PIN</label>
-            <input
-              id="reg-pin"
-              v-model="pin"
-              type="password"
-              class="field-input field-input--pin"
-              placeholder="· · · ·"
-              inputmode="numeric"
-              maxlength="16"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="reg-phrase">
-              Frase de seguridad
-              <button
-                type="button"
-                class="toggle-visibility"
-                @click="showPhrase = !showPhrase"
-                :aria-label="showPhrase ? 'Ocultar frase' : 'Mostrar frase'"
-              >
-                {{ showPhrase ? 'ocultar' : 'mostrar' }}
-              </button>
-            </label>
-            <input
-              id="reg-phrase"
-              v-model="phrase"
-              :type="showPhrase ? 'text' : 'password'"
-              class="field-input"
-              placeholder="una frase que solo tú conozcas"
-              autocomplete="off"
-            />
-          </div>
-
-          <p v-if="pinError" class="form-error" role="alert">{{ pinError }}</p>
-
-          <button type="submit" class="btn-primary" :disabled="pinLoading">
-            <span v-if="!pinLoading">Activar vault</span>
-            <span v-else class="btn-loading" aria-label="Configurando">
-              <span class="dot" /><span class="dot" /><span class="dot" />
-            </span>
-          </button>
-
-          <button type="button" class="btn-ghost" @click="backToAccount">
-            ← Volver
-          </button>
-        </form>
-
-      </Transition>
-
-      <div class="step-dots" aria-hidden="true">
-        <span class="step-dot" :class="{ active: step === 'account' }" />
-        <span class="step-dot" :class="{ active: step === 'pin' }" />
-      </div>
+        <RouterLink to="/login" class="btn-ghost">
+          ¿Ya tienes cuenta? Inicia sesión
+        </RouterLink>
+      </form>
     </main>
   </div>
 </template>
@@ -286,7 +160,6 @@ function backToAccount() {
   --c-accent-hover: #43a088;
   --c-accent-dim: rgba(54, 129, 106, 0.1);
   --c-error: #b83232;
-  --c-success: #36816a;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
   --radius: 5px;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -388,22 +261,6 @@ function backToAccount() {
   gap: 1rem;
 }
 
-.step-hint {
-  font-size: 0.75rem;
-  color: var(--c-text-muted);
-  line-height: 1.65;
-  margin: 0;
-  padding: 0.7rem 0.8rem;
-  border-left: 2px solid var(--c-border-focus);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  background: rgba(54, 129, 106, 0.05);
-}
-
-.step-hint strong {
-  color: var(--c-error);
-  font-weight: 600;
-}
-
 .field {
   display: flex;
   flex-direction: column;
@@ -411,9 +268,6 @@ function backToAccount() {
 }
 
 .field-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   font-size: 0.67rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -431,22 +285,6 @@ function backToAccount() {
   color: var(--c-error);
   opacity: 1;
 }
-
-.toggle-visibility {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--c-accent);
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 150ms var(--ease);
-}
-
-.toggle-visibility:hover { opacity: 1; }
 
 .field-input {
   width: 100%;
@@ -474,12 +312,6 @@ function backToAccount() {
   border-color: var(--c-border-focus);
   background: rgba(54, 129, 106, 0.04);
   box-shadow: 0 0 0 3px rgba(54, 129, 106, 0.08);
-}
-
-.field-input--pin {
-  letter-spacing: 0.35em;
-  text-align: center;
-  font-size: 1rem;
 }
 
 /* ─── Mensajes ──────────────────────────────────────────────────── */
@@ -562,43 +394,6 @@ function backToAccount() {
 @keyframes pulse {
   0%, 80%, 100% { opacity: 0.15; transform: scale(0.75); }
   40%            { opacity: 1;   transform: scale(1); }
-}
-
-/* ─── Step dots ─────────────────────────────────────────────────── */
-.step-dots {
-  display: flex;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 1.5rem;
-}
-
-.step-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--c-border);
-  transition: background 200ms var(--ease), transform 200ms var(--ease);
-}
-
-.step-dot.active {
-  background: var(--c-accent);
-  transform: scale(1.4);
-}
-
-/* ─── Slide transition ──────────────────────────────────────────── */
-.slide-enter-active,
-.slide-leave-active {
-  transition: all 220ms var(--ease);
-}
-
-.slide-enter-from {
-  opacity: 0;
-  transform: translateX(14px);
-}
-
-.slide-leave-to {
-  opacity: 0;
-  transform: translateX(-14px);
 }
 
 /* ─── Mobile ────────────────────────────────────────────────────── */

@@ -8,10 +8,11 @@ import { setActivePinia, createPinia } from 'pinia'
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const { mockCreate, mockEncrypt, mockGenerateIV, mockPush } = vi.hoisted(() => ({
+const { mockCreate, mockEncrypt, mockGenerateIV, mockDeriveKey, mockPush } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockEncrypt: vi.fn(),
   mockGenerateIV: vi.fn(),
+  mockDeriveKey: vi.fn(),
   mockPush: vi.fn(),
 }))
 
@@ -27,18 +28,29 @@ vi.mock('../services/api.js', () => ({
 vi.mock('../crypto/vault.js', () => ({
   encrypt: mockEncrypt,
   generateIV: mockGenerateIV,
+  deriveKey: mockDeriveKey,
 }))
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 import NewSecretView from '../views/NewSecretView.vue'
-import { useCryptoStore } from '../stores/crypto.js'
+import { useAuthStore } from '../stores/auth.js'
 import { useSecretsStore } from '../stores/secrets.js'
 
 function mountView() {
   return mount(NewSecretView, {
     global: { stubs: { RouterLink: { template: '<a><slot/></a>', props: ['to'] } } },
   })
+}
+
+/** Helper: rellena y envía el formulario hasta abrir el modal de PIN */
+async function fillAndSubmit(wrapper, { alias = 'My Token', type = 'Token', fieldId = '#field-token', fieldValue = 'ghp_abc' } = {}) {
+  const typeBtn = wrapper.findAll('.type-btn').find((b) => b.text() === type)
+  await typeBtn.trigger('click')
+  await wrapper.find('#alias').setValue(alias)
+  await wrapper.find(fieldId).setValue(fieldValue)
+  await wrapper.find('form').trigger('submit')
+  await flushPromises()
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -49,6 +61,7 @@ describe('NewSecretView', () => {
     mockCreate.mockClear()
     mockEncrypt.mockClear()
     mockGenerateIV.mockClear()
+    mockDeriveKey.mockClear()
     mockPush.mockClear()
   })
 
@@ -98,35 +111,35 @@ describe('NewSecretView', () => {
     expect(wrapper.find('.btn-primary').attributes('disabled')).toBeDefined()
   })
 
-  it('cifra y envía el secreto al submit', async () => {
-    const cryptoStore = useCryptoStore()
-    cryptoStore.setKey({})
+  it('abre el modal de PIN al hacer submit con datos válidos', async () => {
+    const wrapper = mountView()
+    await fillAndSubmit(wrapper)
+    expect(wrapper.find('.modal-card').exists()).toBe(true)
+    expect(wrapper.find('#new-pin-input').exists()).toBe(true)
+  })
+
+  it('cifra y envía el secreto tras confirmar PIN+frase', async () => {
+    const authStore = useAuthStore()
+    authStore.setSession({ token: 'tok', refreshToken: 'ref', email: 'a@b.com', salt: 'salt123' })
+
     mockGenerateIV.mockReturnValue('mock-iv')
+    mockDeriveKey.mockResolvedValue({ type: 'secret' })
     mockEncrypt.mockResolvedValue('encrypted-blob')
     mockCreate.mockResolvedValue({
-      data: { id: '1', alias: 'Test', secret_type: 'token', created_at: '', updated_at: '' },
+      data: { id: '1', alias: 'My Token', secret_type: 'token', created_at: '', updated_at: '' },
     })
 
     const wrapper = mountView()
+    await fillAndSubmit(wrapper)
 
-    // Seleccionar tipo Token
-    const tokenBtn = wrapper.findAll('.type-btn').find((b) => b.text() === 'Token')
-    await tokenBtn.trigger('click')
-
-    // Completar alias y campo
-    await wrapper.find('#alias').setValue('My Token')
-    await wrapper.find('#field-token').setValue('ghp_abc123')
-
-    // Submit
-    await wrapper.find('form').trigger('submit')
+    await wrapper.find('#new-pin-input').setValue('1234')
+    await wrapper.find('#new-phrase-input').setValue('my phrase')
+    await wrapper.find('.modal-form').trigger('submit')
     await flushPromises()
 
+    expect(mockDeriveKey).toHaveBeenCalledWith('1234', 'my phrase', 'salt123')
     expect(mockGenerateIV).toHaveBeenCalled()
-    expect(mockEncrypt).toHaveBeenCalledWith(
-      { token: 'ghp_abc123' },
-      {},
-      'mock-iv',
-    )
+    expect(mockEncrypt).toHaveBeenCalledWith({ token: 'ghp_abc' }, { type: 'secret' }, 'mock-iv')
     expect(mockCreate).toHaveBeenCalledWith({
       alias: 'My Token',
       secret_type: 'token',
@@ -137,37 +150,56 @@ describe('NewSecretView', () => {
   })
 
   it('agrega el secreto al store local tras crear', async () => {
-    const cryptoStore = useCryptoStore()
+    const authStore = useAuthStore()
+    authStore.setSession({ token: 'tok', refreshToken: 'ref', email: 'a@b.com', salt: 'salt123' })
     const secretsStore = useSecretsStore()
-    cryptoStore.setKey({})
+
     mockGenerateIV.mockReturnValue('iv')
+    mockDeriveKey.mockResolvedValue({})
     mockEncrypt.mockResolvedValue('enc')
     const newSecret = { id: '2', alias: 'DB', secret_type: 'database', created_at: '', updated_at: '' }
     mockCreate.mockResolvedValue({ data: newSecret })
 
     const wrapper = mountView()
-    await wrapper.find('#alias').setValue('DB')
-    await wrapper.find('#field-url').setValue('https://app.com')
-    await wrapper.find('form').trigger('submit')
+    await fillAndSubmit(wrapper)
+
+    await wrapper.find('#new-pin-input').setValue('1234')
+    await wrapper.find('#new-phrase-input').setValue('phrase')
+    await wrapper.find('.modal-form').trigger('submit')
     await flushPromises()
 
     expect(secretsStore.list).toContainEqual(newSecret)
   })
 
-  it('muestra error si la API falla', async () => {
-    const cryptoStore = useCryptoStore()
-    cryptoStore.setKey({})
+  it('muestra error en el modal si la API falla', async () => {
+    const authStore = useAuthStore()
+    authStore.setSession({ token: 'tok', refreshToken: 'ref', email: 'a@b.com', salt: 'salt123' })
+
     mockGenerateIV.mockReturnValue('iv')
+    mockDeriveKey.mockResolvedValue({})
     mockEncrypt.mockResolvedValue('enc')
-    mockCreate.mockRejectedValue(new Error('API error'))
+    mockCreate.mockRejectedValue({ response: { status: 500 } })
 
     const wrapper = mountView()
-    await wrapper.find('#alias').setValue('Fail')
-    await wrapper.find('#field-url').setValue('https://x.com')
-    await wrapper.find('form').trigger('submit')
+    await fillAndSubmit(wrapper)
+
+    await wrapper.find('#new-pin-input').setValue('1234')
+    await wrapper.find('#new-phrase-input').setValue('phrase')
+    await wrapper.find('.modal-form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.find('.form-error').exists()).toBe(true)
+    expect(wrapper.find('.modal-card .form-error').exists()).toBe(true)
     expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it('cierra el modal al cancelar', async () => {
+    const wrapper = mountView()
+    await fillAndSubmit(wrapper)
+    expect(wrapper.find('.modal-card').exists()).toBe(true)
+
+    await wrapper.find('.modal-actions .btn-ghost').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.modal-card').exists()).toBe(false)
   })
 })

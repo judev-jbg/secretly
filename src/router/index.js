@@ -59,13 +59,11 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore()
 
-  const isAuthenticated = auth.isAuthenticated
-
-  if (to.meta.requiresAuth && !isAuthenticated) {
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'login' }
   }
 
-  if (to.meta.public && isAuthenticated) {
+  if (to.meta.public && auth.isAuthenticated) {
     return { name: 'vault' }
   }
 })
