@@ -74,17 +74,16 @@ async function submitForgot() {
     <main class="login-card">
       <header class="login-header">
         <div class="logo-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="11" width="18" height="11" rx="2" />
-            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-          </svg>
+          <picture>
+            <source srcset="/secretly_light_logo.png" media="(prefers-color-scheme: light)" />
+            <img src="/secretly_dark_logo.png" alt="Secretly" class="logo-img" />
+          </picture>
         </div>
         <h1 class="login-title">secretly</h1>
         <p class="login-subtitle">acceso seguro</p>
       </header>
 
       <Transition name="slide" mode="out-in">
-
         <!-- Credenciales -->
         <form
           v-if="!showForgot"
@@ -132,19 +131,11 @@ async function submitForgot() {
             ¿Olvidaste tu contraseña?
           </button>
 
-          <RouterLink to="/register" class="btn-ghost">
-            ¿No tienes cuenta? Regístrate
-          </RouterLink>
+          <RouterLink to="/register" class="btn-ghost"> ¿No tienes cuenta? Regístrate </RouterLink>
         </form>
 
         <!-- Recuperar contraseña -->
-        <form
-          v-else
-          key="forgot"
-          class="login-form"
-          @submit.prevent="submitForgot"
-          novalidate
-        >
+        <form v-else key="forgot" class="login-form" @submit.prevent="submitForgot" novalidate>
           <p class="step-hint">
             Ingresa tu email y te enviaremos un enlace para restablecer tu contraseña.
           </p>
@@ -171,7 +162,11 @@ async function submitForgot() {
             </span>
           </button>
 
-          <RouterLink v-if="forgotStatus" to="/reset-password" class="btn-primary btn-primary--outline">
+          <RouterLink
+            v-if="forgotStatus"
+            to="/reset-password"
+            class="btn-primary btn-primary--outline"
+          >
             Ingresar token →
           </RouterLink>
 
@@ -183,7 +178,6 @@ async function submitForgot() {
             ← Volver
           </button>
         </form>
-
       </Transition>
     </main>
   </div>
@@ -197,7 +191,7 @@ async function submitForgot() {
   --c-border: #1a1f26;
   --c-border-focus: #36816a;
   --c-text: #c4cad4;
-  --c-text-muted: #3e4855;
+  --c-text-muted: #657283;
   --c-accent: #36816a;
   --c-accent-hover: #43a088;
   --c-accent-dim: rgba(54, 129, 106, 0.1);
@@ -255,8 +249,14 @@ async function submitForgot() {
 }
 
 @keyframes card-in {
-  from { opacity: 0; transform: translateY(18px) scale(0.975); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ─── Header ────────────────────────────────────────────────────── */
@@ -266,20 +266,19 @@ async function submitForgot() {
 }
 
 .logo-mark {
-  width: 42px;
-  height: 42px;
-  margin: 0 auto 1rem;
-  color: var(--c-accent);
-  background: var(--c-accent-dim);
-  border: 1px solid rgba(54, 129, 106, 0.2);
-  border-radius: 9px;
+  width: 90px;
+  height: 70px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 9px;
 }
 
-.logo-mark svg { width: 100%; height: 100%; }
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 
 .login-title {
   font-size: 1.375rem;
@@ -408,8 +407,13 @@ async function submitForgot() {
   transform: translateY(-1px);
 }
 
-.btn-primary:active:not(:disabled) { transform: translateY(0); }
-.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 .btn-primary--outline {
   background: transparent;
@@ -437,7 +441,9 @@ async function submitForgot() {
   display: block;
 }
 
-.btn-ghost:hover { color: var(--c-text); }
+.btn-ghost:hover {
+  color: var(--c-text);
+}
 
 /* ─── Loading dots ──────────────────────────────────────────────── */
 .btn-loading {
@@ -454,12 +460,24 @@ async function submitForgot() {
   animation: pulse 1.1s ease-in-out infinite;
 }
 
-.dot:nth-child(2) { animation-delay: 0.18s; }
-.dot:nth-child(3) { animation-delay: 0.36s; }
+.dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
 
 @keyframes pulse {
-  0%, 80%, 100% { opacity: 0.15; transform: scale(0.75); }
-  40%            { opacity: 1;   transform: scale(1); }
+  0%,
+  80%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.75);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* ─── Slide transition ──────────────────────────────────────────── */

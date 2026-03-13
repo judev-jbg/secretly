@@ -39,12 +39,12 @@ function setViewMode(mode) {
   localStorage.setItem('vault_view', mode)
 }
 
-/** Destruye la sesión y recarga la app. */
+/** Destruye la sesión y redirige al login. */
 function logout() {
   auth.clear()
   crypto.clear()
   secrets.clear()
-  window.location.reload()
+  router.push({ name: 'login' })
 }
 
 onMounted(async () => {
