@@ -91,7 +91,7 @@ api.interceptors.response.use(
       auth.clear()
       useCryptoStore().clear()
       useSecretsStore().clear()
-      window.location.reload()
+      window.location.href = '/'
 
       return Promise.reject(error)
     } finally {
