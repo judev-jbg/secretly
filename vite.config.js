@@ -12,7 +12,12 @@ export default defineConfig({
     vueDevTools(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'secretly_logo.png', 'secretly_dark_logo.png', 'secretly_light_logo.png'],
+      includeAssets: [
+        'favicon.ico',
+        'secretly_logo.png',
+        'secretly_dark_logo.png',
+        'secretly_light_logo.png',
+      ],
       manifest: {
         name: 'Secretly',
         short_name: 'Secretly',
@@ -25,17 +30,17 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/secretly_logo.png',
+            src: '/secretly_dark_logo.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/secretly_logo.png',
+            src: '/secretly_dark_logo.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: '/secretly_logo.png',
+            src: '/secretly_dark_logo.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
