@@ -2,7 +2,7 @@
 
 Gestor de secretos Zero-Knowledge. Cifrado AES-256-GCM con clave derivada localmente via Argon2id — el servidor nunca ve datos en claro.
 
-**Demo:** [secretly.vercel.app](https://secretly.vercel.app) · **API:** Railway
+**Frontend:** [secretly-two.vercel.app](https://secretly-two.vercel.app/) · **API:** Railway
 
 ---
 
@@ -14,8 +14,8 @@ Gestor de secretos Zero-Knowledge. Cifrado AES-256-GCM con clave derivada localm
 
 ## Variables de entorno
 
-| Variable | Descripción | Ejemplo |
-|---|---|---|
+| Variable       | Descripción          | Ejemplo                                   |
+| -------------- | -------------------- | ----------------------------------------- |
 | `VITE_API_URL` | URL base del backend | `https://secretly-api.up.railway.app/api` |
 
 Configurar en **Vercel → Settings → Environment Variables**.
